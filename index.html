@@ -157,7 +157,6 @@
             <div class="card">
                 <div class="user-header">
                     <h3 id="welcome-msg" style="margin: 0;"></h3>
-                    <!-- زرار تسجيل الخروج الجديد -->
                     <button id="logout-btn" class="btn btn-logout">تغيير الحساب 🔄</button>
                 </div>
                 
@@ -204,7 +203,6 @@
     <!-- استدعاء Firebase -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        // لاحظ إضافة signOut هنا
         import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
@@ -225,14 +223,11 @@
         const db = getFirestore(app);
         const provider = new GoogleAuthProvider();
 
-        // مفتاح جروق (Groq) 
         const GROQ_API_KEY = "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";
-        // رابط الدفع من سترايب
         const STRIPE_PAYMENT_LINK = "https://buy.stripe.com/test_6oU9ASaia207aWh4L96c000";
 
         let currentUser = null;
 
-        // دالة تحديث الـ Streak
         async function updateStreak(uid) {
             const userDocRef = doc(db, "users", uid);
             const userDoc = await getDoc(userDocRef);
@@ -275,7 +270,6 @@
             document.getElementById('high-streak').innerText = highest;
         }
 
-        // فحص حالة الاشتراك
         async function checkSubscription(uid) {
             const userDoc = await getDoc(doc(db, "users", uid));
             const badge = document.getElementById('account-status-badge');
@@ -296,46 +290,57 @@
             document.getElementById('tool-area').classList.add('hidden');
         }
 
-        // تسجيل الدخول
         document.getElementById('login-btn').addEventListener('click', () => {
             signInWithPopup(auth, provider).catch(error => alert("خطأ: " + error.message));
         });
 
-        // تسجيل الخروج / تغيير الحساب
         document.getElementById('logout-btn').addEventListener('click', () => {
             signOut(auth).then(() => {
-                // سيتم التعامل مع إخفاء الواجهة تلقائياً في onAuthStateChanged
                 alert("تم تسجيل الخروج بنجاح.");
             }).catch((error) => {
                 alert("حدث خطأ أثناء تسجيل الخروج: " + error.message);
             });
         });
 
-        // مراقبة حالة المستخدم
+        // مراقبة حالة المستخدم + فحص الدفع
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
                 document.getElementById('auth-section').classList.add('hidden');
                 document.getElementById('user-section').classList.remove('hidden');
                 
-                // عرض الاسم الأول فقط لو كان الاسم طويل
                 const firstName = user.displayName ? user.displayName.split(' ')[0] : 'يا بطل';
                 document.getElementById('welcome-msg').innerText = `مرحباً، ${firstName}! 👋`;
                 
+                // فحص إذا كان المستخدم عائد من صفحة الدفع بنجاح
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('success') === 'true') {
+                    const oneMonth = 30 * 24 * 60 * 60 * 1000;
+                    await setDoc(doc(db, "users", user.uid), {
+                        email: user.email,
+                        plan: "premium",
+                        premiumUntil: Date.now() + oneMonth
+                    }, { merge: true });
+                    
+                    alert("عاش! تم تأكيد الدفع بنجاح وحسابك بقى بريميوم 💎");
+                    
+                    // تنظيف الرابط
+                    window.history.replaceState(null, null, window.location.pathname);
+                }
+
                 await updateStreak(user.uid);
                 await checkSubscription(user.uid);
             } else {
                 currentUser = null;
                 document.getElementById('auth-section').classList.remove('hidden');
                 document.getElementById('user-section').classList.add('hidden');
-                // إعادة تعيين الحقول
                 document.getElementById('result-box').classList.add('hidden');
                 document.getElementById('fb-url').value = '';
                 document.getElementById('promo-code').value = '';
             }
         });
 
-        // التعامل مع زر الدفع وكود الخصم
+        // زرار الدفع
         document.getElementById('checkout-btn').addEventListener('click', async () => {
             const code = document.getElementById('promo-code').value.trim();
 
@@ -347,32 +352,18 @@
                     premiumUntil: Date.now() + oneMonth
                 }, { merge: true });
 
-                alert("عاش! تم تفعيل الخصم بنجاح وحسابك أصبح بريميوم.");
+                alert("تم تفعيل كود الخصم بنجاح وحسابك أصبح بريميوم.");
                 checkSubscription(currentUser.uid);
             } else {
-                // تجهيز رابط سترايب مع إضافة الإيميل المسجل حالياً بشكل تلقائي
+                // تجهيز رابط سترايب بالإيميل وفتحه في نفس الصفحة (عشان الـ Redirect يشتغل صح)
                 const userEmail = encodeURIComponent(currentUser.email);
                 const finalStripeLink = `${STRIPE_PAYMENT_LINK}?prefilled_email=${userEmail}`;
                 
-                // فتح رابط Stripe التجريبي مع الإيميل المضاف
-                window.open(finalStripeLink, "_blank");
-                
-                // تنبيه للتفعيل التجريبي فوراً (عشان التست)
-                setTimeout(async () => {
-                    if(confirm("بما أننا في وضع الـ Test Mode، هل قمت بالدفع التجريبي بنجاح؟ (اضغط OK لتفعيل الحساب ديمو)")) {
-                        const oneMonth = 30 * 24 * 60 * 60 * 1000;
-                        await setDoc(doc(db, "users", currentUser.uid), {
-                            email: currentUser.email,
-                            plan: "premium",
-                            premiumUntil: Date.now() + oneMonth
-                        }, { merge: true });
-                        checkSubscription(currentUser.uid);
-                    }
-                }, 2000);
+                window.open(finalStripeLink, "_self");
             }
         });
 
-        // تشغيل الذكاء الاصطناعي للتحليل
+        // زرار التحليل (Groq API)
         document.getElementById('analyze-btn').addEventListener('click', async () => {
             const url = document.getElementById('fb-url').value.trim();
             if(!url) return alert("الرجاء إدخال رابط صفحة الفيسبوك أولاً.");

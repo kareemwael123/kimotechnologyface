@@ -11,6 +11,7 @@
             --primary: #1877f2;
             --secondary: #2b3436;
             --success: #00a400;
+            --danger: #dc3545;
             --bg-color: #f0f2f5;
             --card-bg: #ffffff;
         }
@@ -43,7 +44,7 @@
             margin-bottom: 25px;
             transition: transform 0.3s ease;
         }
-        .card:hover { transform: translateY(-5px); }
+        .card:hover { transform: translateY(-3px); }
         
         h2 { color: var(--primary); margin-top: 0; }
         
@@ -65,6 +66,8 @@
         .btn-google:hover { background-color: #c5221f; }
         .btn-success { background-color: var(--success); }
         .btn-success:hover { background-color: #008000; }
+        .btn-logout { background-color: var(--danger); font-size: 14px; padding: 8px 15px; width: auto; margin-top: 15px; }
+        .btn-logout:hover { background-color: #c82333; }
         
         input[type="text"], input[type="url"] {
             width: 100%;
@@ -112,6 +115,7 @@
             white-space: pre-wrap;
             line-height: 1.8;
             font-size: 16px;
+            text-align: right;
         }
         
         .hidden { display: none !important; }
@@ -126,7 +130,9 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         
-        .footer { text-align: center; margin-top: 40px; color: #888; font-size: 14px; }
+        .footer { text-align: center; margin-top: 40px; color: #888; font-size: 14px; padding-bottom: 20px; }
+        
+        .user-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -145,15 +151,19 @@
             <button id="login-btn" class="btn btn-google">تسجيل الدخول السريع بـ Google 👤</button>
         </div>
 
-        <!-- لوحة تحكم المستخدم (مخفية حتى تسجيل الدخول) -->
+        <!-- لوحة تحكم المستخدم -->
         <div id="user-section" class="hidden">
             
             <div class="card">
-                <h3 id="welcome-msg" style="margin-top: 0;"></h3>
+                <div class="user-header">
+                    <h3 id="welcome-msg" style="margin: 0;"></h3>
+                    <!-- زرار تسجيل الخروج الجديد -->
+                    <button id="logout-btn" class="btn btn-logout">تغيير الحساب 🔄</button>
+                </div>
                 
                 <!-- نظام الستريك -->
                 <div class="streak-container">
-                    <div>🔥 أيام الاستخدام المتتالية: <span id="current-streak" style="font-size: 20px;">0</span></div>
+                    <div>🔥 أيام الاستخدام: <span id="current-streak" style="font-size: 20px;">0</span></div>
                     <div>🏆 أعلى رقم: <span id="high-streak">0</span></div>
                 </div>
 
@@ -194,7 +204,8 @@
     <!-- استدعاء Firebase -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        // لاحظ إضافة signOut هنا
+        import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
         import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // إعدادات الفايربيز
@@ -290,19 +301,37 @@
             signInWithPopup(auth, provider).catch(error => alert("خطأ: " + error.message));
         });
 
+        // تسجيل الخروج / تغيير الحساب
+        document.getElementById('logout-btn').addEventListener('click', () => {
+            signOut(auth).then(() => {
+                // سيتم التعامل مع إخفاء الواجهة تلقائياً في onAuthStateChanged
+                alert("تم تسجيل الخروج بنجاح.");
+            }).catch((error) => {
+                alert("حدث خطأ أثناء تسجيل الخروج: " + error.message);
+            });
+        });
+
         // مراقبة حالة المستخدم
         onAuthStateChanged(auth, async (user) => {
             if (user) {
                 currentUser = user;
                 document.getElementById('auth-section').classList.add('hidden');
                 document.getElementById('user-section').classList.remove('hidden');
-                document.getElementById('welcome-msg').innerText = `مرحباً بعودتك، ${user.displayName}! 👋`;
+                
+                // عرض الاسم الأول فقط لو كان الاسم طويل
+                const firstName = user.displayName ? user.displayName.split(' ')[0] : 'يا بطل';
+                document.getElementById('welcome-msg').innerText = `مرحباً، ${firstName}! 👋`;
                 
                 await updateStreak(user.uid);
                 await checkSubscription(user.uid);
             } else {
+                currentUser = null;
                 document.getElementById('auth-section').classList.remove('hidden');
                 document.getElementById('user-section').classList.add('hidden');
+                // إعادة تعيين الحقول
+                document.getElementById('result-box').classList.add('hidden');
+                document.getElementById('fb-url').value = '';
+                document.getElementById('promo-code').value = '';
             }
         });
 
@@ -321,19 +350,25 @@
                 alert("عاش! تم تفعيل الخصم بنجاح وحسابك أصبح بريميوم.");
                 checkSubscription(currentUser.uid);
             } else {
-                // فتح رابط Stripe التجريبي
-                window.open(STRIPE_PAYMENT_LINK, "_blank");
+                // تجهيز رابط سترايب مع إضافة الإيميل المسجل حالياً بشكل تلقائي
+                const userEmail = encodeURIComponent(currentUser.email);
+                const finalStripeLink = `${STRIPE_PAYMENT_LINK}?prefilled_email=${userEmail}`;
                 
-                // تنبيه: في الموقع الحقيقي بنستخدم Webhook، هنا هنفعل الحساب مؤقتاً للتجربة
-                if(confirm("بما أننا في وضع الـ Test Mode، هل قمت بالدفع التجريبي بنجاح؟ (اضغط OK لتفعيل الحساب ديمو)")) {
-                    const oneMonth = 30 * 24 * 60 * 60 * 1000;
-                    await setDoc(doc(db, "users", currentUser.uid), {
-                        email: currentUser.email,
-                        plan: "premium",
-                        premiumUntil: Date.now() + oneMonth
-                    }, { merge: true });
-                    checkSubscription(currentUser.uid);
-                }
+                // فتح رابط Stripe التجريبي مع الإيميل المضاف
+                window.open(finalStripeLink, "_blank");
+                
+                // تنبيه للتفعيل التجريبي فوراً (عشان التست)
+                setTimeout(async () => {
+                    if(confirm("بما أننا في وضع الـ Test Mode، هل قمت بالدفع التجريبي بنجاح؟ (اضغط OK لتفعيل الحساب ديمو)")) {
+                        const oneMonth = 30 * 24 * 60 * 60 * 1000;
+                        await setDoc(doc(db, "users", currentUser.uid), {
+                            email: currentUser.email,
+                            plan: "premium",
+                            premiumUntil: Date.now() + oneMonth
+                        }, { merge: true });
+                        checkSubscription(currentUser.uid);
+                    }
+                }, 2000);
             }
         });
 
